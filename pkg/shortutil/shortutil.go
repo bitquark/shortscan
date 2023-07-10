@@ -35,6 +35,7 @@ type wordlistRecord struct {
 var args struct {
 	Wordlist *struct {
 		Filename string `arg:"positional,required" help:"wordlist to ingest"`
+		Variants bool   `arg:"--variants" help:"generate checksums for case variants of input words (e.g. ping.aspx, Ping.aspx, PING.ASPX)" default:"true"`
 	} `arg:"subcommand:wordlist" help:"add hashes to a wordlist for use with, for example, shortscan"`
 	Checksum *struct {
 		Filename string `arg:"positional,required" help:"filename to checksum"`
@@ -52,7 +53,7 @@ var shortReplacer = strings.NewReplacer(" ", "", ".", "", ":", "_", "+", "_", ",
 // Checksum calculates the short filename checksum for the given filename
 // Based on: https://tomgalvin.uk/assets/8dot3-checksum.c
 // Docs: https://tomgalvin.uk/blog/gen/2015/06/09/filenames/
-func Checksum(f string) uint16 {
+func Checksum(f string) string {
 
 	var ck uint16
 	for _, c := range f {
@@ -65,14 +66,14 @@ func Checksum(f string) uint16 {
 	ck = uint16(t)
 	ck = (ck&0xf000)>>12 | (ck&0x0f00)>>4 | (ck&0x00f0)<<4 | (ck&0x000f)<<12
 
-	return ck
+	return fmt.Sprintf("%04X", ck)
 
 }
 
 // ChecksumOriginal calculates the checksum for the given filename using the
 // older of Microsoft's two checksum algorithms. This function is my translation
 // of the checksum algorithm contained in the leaked Windows 2003 Server source
-func ChecksumOriginal(f string) uint16 {
+func ChecksumOriginal(f string) string {
 
 	var ck uint16
 	ck = (uint16(f[0])<<8 + uint16(f[1])) & 0xffff
@@ -88,7 +89,7 @@ func ChecksumOriginal(f string) uint16 {
 	}
 
 	ck = (ck&0xf000)>>12 | (ck&0x0f00)>>4 | (ck&0x00f0)<<4 | (ck&0x000f)<<12
-	return ck
+	return fmt.Sprintf("%04X", ck)
 
 }
 
@@ -143,8 +144,21 @@ func ChecksumWords(fh io.Reader, paramRegex *regexp.Regexp) []wordlistRecord {
 			continue
 		}
 
-		// Add the word to the list
-		wc = append(wc, wordlistRecord{fmt.Sprintf("%04X", Checksum(w)), f, e, f83, e83})
+		// Generate checksums for case variants
+		vs := make(map[string]struct{})
+		if args.Wordlist.Variants {
+			vs[Checksum(w)] = struct{}{}
+			vs[Checksum(strings.ToLower(w))] = struct{}{}
+			vs[Checksum(strings.ToUpper(w))] = struct{}{}
+			vs[Checksum(strings.Title(w))] = struct{}{}
+		}
+		var c string
+		for v := range vs {
+			c += v
+		}
+
+		// Add the wordlist entry to the list
+		wc = append(wc, wordlistRecord{c, f, e, f83, e83})
 
 	}
 
@@ -183,13 +197,13 @@ func Run() {
 
 	// Generate a one-off checksum
 	case args.Checksum != nil:
-		var c uint16
+		var c string
 		if args.Checksum.Original {
 			c = ChecksumOriginal(args.Checksum.Filename)
 		} else {
 			c = Checksum(args.Checksum.Filename)
 		}
-		fmt.Printf("%04X\n", c)
+		fmt.Println(c)
 	}
 
 }

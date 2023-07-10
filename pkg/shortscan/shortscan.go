@@ -55,7 +55,7 @@ type distances struct {
 }
 
 type wordlistRecord struct {
-        checksum    string
+        checksums   string
         filename    string
         extension   string
 	filename83  string
@@ -491,9 +491,12 @@ func autodechecksum(ac *attackConfig, br baseRequest) []wordlistRecord {
         go getWordlist(ch, ac)
         for record := range ch {
 
-		// If the potential checksum matches the wordlist checksum and the filename prefix and extension match
-		if record.checksum == checksum && strings.HasPrefix(record.filename, prefix) && strings.HasPrefix(record.extension, br.ext) {
-			fs[record.filename + record.extension] = record
+		// If the potential checksum matches a wordlist checksum and the filename prefix and extension match
+		for i := 0; i < len(record.checksums); i+=4 {
+			c := record.checksums[i:i+4]
+			if c == checksum && strings.HasPrefix(strings.ToUpper(record.filename), prefix) && strings.HasPrefix(strings.ToUpper(record.extension), br.ext) {
+				fs[record.filename + record.extension] = record
+			}
 		}
 
 	}
