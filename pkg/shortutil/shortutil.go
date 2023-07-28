@@ -1,9 +1,9 @@
-// ----------------------------------------------------------
+// ----------------------------------------------------
 // Shortutil
-// An IIS short filename utility written by bitquark
-// ----------------------------------------------------------
+// A short filename utility written by bitquark
+// ----------------------------------------------------
 // Docs and code: https://github.com/bitquark/shortscan
-// ----------------------------------------------------------
+// ----------------------------------------------------
 
 package shortutil
 
@@ -35,6 +35,8 @@ type wordlistRecord struct {
 var args struct {
 	Wordlist *struct {
 		Filename string `arg:"positional,required" help:"wordlist to ingest"`
+		KeepCase bool   `arg:"--keepcase" help:"keep the original case rather than upper-casing words" default:"false"`
+		Uniq     bool   `arg:"--uniq" help:"allow only unique words" default:"true"`
 		Variants bool   `arg:"--variants" help:"generate checksums for case variants of input words (e.g. ping.aspx, Ping.aspx, PING.ASPX)" default:"true"`
 	} `arg:"subcommand:wordlist" help:"add hashes to a wordlist for use with, for example, shortscan"`
 	Checksum *struct {
@@ -49,6 +51,9 @@ var paramRegex = regexp.MustCompile("[?;#&\r\n]")
 // Remove spaces and dots, translate the special 7 characters : + , ; = [ ] into underscores
 // Special character rules taken from the leaked Windows 2003 source (gen8dot3.c)
 var shortReplacer = strings.NewReplacer(" ", "", ".", "", ":", "_", "+", "_", ",", "_", ";", "_", "=", "_", "[", "_", "]", "_")
+
+// Version
+const version = "0.3"
 
 // Checksum calculates the short filename checksum for the given filename
 // Based on: https://tomgalvin.uk/assets/8dot3-checksum.c
@@ -173,7 +178,7 @@ func Run() {
 	// Parse command-line arguments
 	p := arg.MustParse(&args)
 	if p.Subcommand() == nil {
-		fmt.Println(color.New(color.FgBlue, color.Bold).Sprint("Shortutil v0.2"), color.New(color.FgBlack, color.Bold).Sprint("// a short filename utility by bitquark"))
+		fmt.Println(color.New(color.FgBlue, color.Bold).Sprint("Shortutil v" + version), "·", color.New(color.FgWhite, color.Bold).Sprint("a short filename utility by bitquark"))
 		p.WriteHelp(os.Stderr)
 		os.Exit(1)
 	}
@@ -186,13 +191,38 @@ func Run() {
 
 	// Process a wordlist
 	case args.Wordlist != nil:
+
+		// Open the wordlist
 		fh, err = os.Open(args.Wordlist.Filename)
 		if err != nil {
 			log.Fatalf("Error: %s\n", err)
 		}
+
+		// Ouput the header and start checksumming
 		fmt.Println("#SHORTSCAN#")
+		words := make(map[string]struct{})
 		for _, w := range ChecksumWords(fh, paramRegex) {
-			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", w.checksum, w.filename83, w.extension83, w.filename, w.extension)
+
+			// Upper case the wordlist entry
+			var f, e string
+			if args.Wordlist.KeepCase {
+				f, e = w.filename, w.extension
+			} else {
+				f, e = strings.ToUpper(w.filename), strings.ToUpper(w.extension)
+			}
+
+			// Uniq the entry
+			if args.Wordlist.Uniq {
+				fe := f + "." + e
+				if _, a := words[fe]; a {
+					continue
+				}
+				words[fe] = struct{}{}
+			}
+
+			// Output the entry
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", w.checksum, w.filename83, w.extension83, f, e)
+
 		}
 
 	// Generate a one-off checksum

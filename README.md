@@ -85,7 +85,7 @@ shortutil wordlist input.txt > output.rainbow
 ### Full usage
 
 ```
-Shortutil v0.2 // a short filename utility by bitquark
+Shortutil v0.3 · a short filename utility by bitquark
 Usage: main <command> [<args>]
 
 Options:
@@ -96,8 +96,12 @@ Commands:
   checksum               generate a one-off checksum for the given filename
 ```
 
+## Wordlist
+
+A custom wordlist was built for shortscan. For full details see [pkg/shortscan/resources/README.md](pkg/shortscan/resources/README.md)
+
 ## Credit
 
 Original IIS short filename [research](https://soroush.secproject.com/downloadable/microsoft_iis_tilde_character_vulnerability_feature.pdf) by Soroush Dalili.
 
-Additional research and this short filename scanner by [bitquark](https://github.com/bitquark).
+Additional research and this project by [bitquark](https://github.com/bitquark).
