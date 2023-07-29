@@ -37,6 +37,18 @@ Shortscan is easy to use with minimal configuration. Basic usage looks like:
 $ shortscan http://example.org/
 ```
 
+### Examples
+
+This example sets multiple custom headers by using `--header`/`-H` multiple times:
+```
+shortscan -H 'Host: example.org' -H 'Authorization: Basic ZGFkZTpsMzN0'
+```
+
+To check whether a site is vulnerable without performing file enumeration use:
+```
+shortscan --isvuln
+```
+
 ### Advanced features
 
 The following options allow further tweaks:
@@ -74,15 +86,25 @@ Options:
 
 ## Utility
 
-Shortscan comes with a utility named `shortutil` for performing various short filename operations and to make custom rainbow tables for use with the tool.
+The shortscan project includes a utility named `shortutil` which can be used to perform various short filename operations and to make custom rainbow tables for use with the tool.
 
-For example, to create a rainbow table from an existing wordlist use:
+### Examples
+
+You can create a rainbow table from an existing wordlist like this:
 
 ```
 shortutil wordlist input.txt > output.rainbow
 ```
 
-### Full usage
+To generate a one-off checksum for a file:
+
+```
+shortutil checksum index.html
+```
+
+### Usage
+
+Run `shortutil <command> --help` for a definiteive list of options for each command.
 
 ```
 Shortutil v0.3 · a short filename utility by bitquark

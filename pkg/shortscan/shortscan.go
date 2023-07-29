@@ -78,7 +78,7 @@ type attackConfig struct {
 }
 
 // Version, rainbow table magic, default character set
-const version = "0.5"
+const version = "0.6"
 const rainbowMagic = "#SHORTSCAN#"
 const alphanum = "JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320"
 
@@ -145,7 +145,14 @@ func fetch(hc *http.Client, st *httpStats, method string, url string) (*http.Res
 		if len(hs) != 2 {
 			log.WithFields(log.Fields{"header": h}).Fatal("Invalid header")
 		}
-		req.Header.Add(strings.Trim(hs[0], " "), strings.Trim(hs[1], " "))
+
+		// Add the header (host requires handling a little differently)
+		h, v := strings.Trim(hs[0], " "), strings.Trim(hs[1], " ")
+		if strings.ToLower(h) == "host" {
+			req.Host = v
+		} else {
+			req.Header.Add(h, v)
+		}
 
 	}
 
