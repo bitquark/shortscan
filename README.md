@@ -41,7 +41,7 @@ $ shortscan http://example.org/
 
 This example sets multiple custom headers by using `--header`/`-H` multiple times:
 ```
-shortscan -H 'Host: example.org' -H 'Authorization: Basic ZGFkZTpsMzN0'
+shortscan -H 'Host: gibson' -H 'Authorization: Basic ZGFkZTpsMzN0'
 ```
 
 To check whether a site is vulnerable without performing file enumeration use:
@@ -55,7 +55,7 @@ The following options allow further tweaks:
 
 ```
 $ shortscan --help
-Shortscan v0.5 · an IIS short filename enumeration tool by bitquark
+Shortscan v0.6 · an IIS short filename enumeration tool by bitquark
 Usage: main [--wordlist FILE] [--header HEADER] [--concurrency CONCURRENCY] [--timeout SECONDS] [--verbosity VERBOSITY] [--fullurl] [--stabilise] [--patience LEVEL] [--characters CHARACTERS] [--autocomplete mode] [--isvuln] URL
 
 Positional arguments:

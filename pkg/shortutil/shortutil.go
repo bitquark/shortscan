@@ -53,7 +53,7 @@ var paramRegex = regexp.MustCompile("[?;#&\r\n]")
 var shortReplacer = strings.NewReplacer(" ", "", ".", "", ":", "_", "+", "_", ",", "_", ";", "_", "=", "_", "[", "_", "]", "_")
 
 // Version
-const version = "0.3"
+const version = "0.4"
 
 // Checksum calculates the short filename checksum for the given filename
 // Based on: https://tomgalvin.uk/assets/8dot3-checksum.c
@@ -99,18 +99,21 @@ func ChecksumOriginal(f string) string {
 }
 
 // Gen8dot3 returns the Windows short filename for a given filename (sans tilde)
-func Gen8dot3(file string, ext string) (string, string) {
+func Gen8dot3(file string, ext string) (bool, string, string) {
 
 	// Upper case the filename and and replace special characters
-	f83 := strings.ToUpper(file)
-	f83 = shortReplacer.Replace(f83)
+	fu := strings.ToUpper(file)
+	fr := shortReplacer.Replace(fu)
 
 	// Upper case the extension and replace special characters
-	e83 := strings.ToUpper(ext)
-	e83 = shortReplacer.Replace(e83)
+	eu := strings.ToUpper(ext)
+	er := shortReplacer.Replace(eu)
+
+	// Determine whether a short filename was required
+	r := len(file) > 8 || len (ext) > 3 || fu != fr || eu != er
 
 	// Trim and return the names
-	return f83[:maths.Min(len(f83), 6)], e83[:maths.Min(len(e83), 3)]
+	return r, fr[:maths.Min(len(fr), 6)], er[:maths.Min(len(er), 3)]
 
 }
 
@@ -142,10 +145,10 @@ func ChecksumWords(fh io.Reader, paramRegex *regexp.Regexp) []wordlistRecord {
 		}
 
 		// Generate an 8.3 filename for the word
-		f83, e83 := Gen8dot3(f, e)
+		r, f83, e83 := Gen8dot3(f, e)
 
 		// Skip the word if Windows wouldn't generate a short filename
-		if strings.ToUpper(f) == f83 && strings.ToUpper(e) == e83 {
+		if !r {
 			continue
 		}
 
