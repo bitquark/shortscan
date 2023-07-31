@@ -997,10 +997,10 @@ func Run() {
 			var r wordlistRecord
 			if p := strings.LastIndex(line, "."); p > 0 && line[0] != '.' {
 				f, e := line[:p], line[p:]
-				f83, e83 := shortutil.Gen8dot3(f, e)
+				_, f83, e83 := shortutil.Gen8dot3(f, e)
 				r = wordlistRecord{"", f, e, f83, e83}
 			} else {
-				f83, _ := shortutil.Gen8dot3(line, "")
+				_, f83, _ := shortutil.Gen8dot3(line, "")
 				r = wordlistRecord{"", line, "", f83, ""}
 			}
 			ac.wordlist.wordlist = append(ac.wordlist.wordlist, r)
