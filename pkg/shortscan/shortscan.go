@@ -78,7 +78,7 @@ type attackConfig struct {
 }
 
 // Version, rainbow table magic, default character set
-const version = "0.6"
+const version = "0.6.2"
 const rainbowMagic = "#SHORTSCAN#"
 const alphanum = "JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320"
 
