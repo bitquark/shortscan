@@ -18,6 +18,7 @@ import (
 	"strings"
 	"math/rand"
 	"crypto/tls"
+	"encoding/json"
 	"net/http"
 	"net/http/httputil"
 	"github.com/fatih/color"
@@ -62,6 +63,32 @@ type wordlistRecord struct {
 	extension83 string
 }
 
+type resultOutput struct {
+	Type      string  `json:"type"`
+	FullMatch bool    `json:"fullmatch"`
+	BaseUrl   string  `json:"baseurl"`
+	File      string  `json:"shortfile"`
+	Ext       string  `json:"shortext"`
+	Tilde     string  `json:"shorttilde"`
+	Partname  string  `json:"partname"`
+	Fullname  string  `json:"fullname"`
+}
+
+type statusOutput struct {
+	Type       string  `json:"type"`
+	Url        string  `json:"url"`
+	Server     string  `json:"server"`
+	Vulnerable bool    `json:"vulnerable"`
+}
+
+type statsOutput struct {
+	Type          string  `json:"type"`
+	Requests      int     `json:"requests"`
+	Retries       int     `json:"retries"`
+	SentBytes     int     `json:"sentbytes"`
+	ReceivedBytes int     `json:"receivedbytes"`
+}
+
 type attackConfig struct {
 	method              string
 	suffix              string
@@ -78,7 +105,7 @@ type attackConfig struct {
 }
 
 // Version, rainbow table magic, default character set
-const version = "0.6.2"
+const version = "0.7"
 const rainbowMagic = "#SHORTSCAN#"
 const alphanum = "JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320"
 
@@ -104,13 +131,14 @@ var statusCache map[string]map[int]struct{}
 var distanceCache map[string]map[int]distances
 var checksumRegex *regexp.Regexp
 
-// Command-line arguments
-var args struct {
+// Command-line arguments and help
+type arguments struct {
 	Url            string   `arg:"positional,required" help:"url to scan"`
 	Wordlist       string   `arg:"-w" help:"combined wordlist + rainbow table generated with shortutil" placeholder:"FILE"`
 	Headers        []string `arg:"--header,-H,separate" help:"header to send with each request (use multiple times for multiple headers)"`
 	Concurrency    int      `arg:"-c" help:"number of requests to make at once" default:"20"`
 	Timeout        int      `arg:"-t" help:"per-request timeout in seconds" placeholder:"SECONDS" default:"10"`
+	Output         string   `arg:"-o" help:"output format (human = human readable; json = JSON)" placeholder:"type" default:"human"`
 	Verbosity      int      `arg:"-v" help:"how much noise to make (0 = quiet; 1 = debug; 2 = trace)" default:"0"`
 	FullUrl        bool     `arg:"-F" help:"display the full URL for confirmed files rather than just the filename" default:"false"`
 	Stabilise      bool     `arg:"-s" help:"attempt to get coherent autocomplete results from an unstable server (generates more requests)" default:"false"`
@@ -118,6 +146,15 @@ var args struct {
 	Characters     string   `arg:"-C" help:"filename characters to enumerate" default:"JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320-_()&'!#$%@^{}~"`
 	Autocomplete   string   `arg:"-a" help:"autocomplete detection mode (auto = autoselect; method = HTTP method magic; status = HTTP status; distance = Levenshtein distance; none = disable)" placeholder:"mode" default:"auto"`
 	IsVuln         bool     `arg:"-V" help:"bail after determining whether the service is vulnerable" default:"false"`
+}
+func (arguments) Version() string {
+	return getBanner()
+}
+var args arguments
+
+// getBanner returns the main banner
+func getBanner() string {
+	return color.New(color.FgBlue, color.Bold).Sprint("Shortscan v" + version) + " · " + color.New(color.FgWhite, color.Bold).Sprint("an IIS short filename enumeration tool by bitquark")
 }
 
 // pathEscape returns an escaped URL with spaces encoded as %20 rather than + (which can cause odd behaviour from IIS in some modes)
@@ -385,7 +422,7 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 							fe = fe + "?"
 						}
 
-						// Colourise the filename
+						// Colourise and output the filename, file parts, and full filename
 						var fp, ff string
 						if fnr != "" {
 							fp = color.HiBlackString(fn + fe)
@@ -401,11 +438,22 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 							if len(br.ext) < 4 {
 								fe = color.GreenString(fe)
 							}
-							fp = strings.Replace(fn+fe, "?", color.HiBlackString("?"), -1)
+							fp = strings.Replace(fn + fe, "?", color.HiBlackString("?"), -1)
 						}
+						printHuman(fmt.Sprintf("%-20s %-28s %s", br.file + br.tilde + br.ext, fp, ff))
 
-						// Display the filename, file parts, and full filename
-						fmt.Printf("%-20s %-28s %s\n", br.file+br.tilde+br.ext, fp, ff)
+						// Output JSON result if requested
+						o := resultOutput {
+							Type: "result",
+							FullMatch: fnr != "",
+							BaseUrl: br.url,
+							File: br.file,
+							Tilde: br.tilde,
+							Ext: br.ext,
+							Partname: fn + fe,
+							Fullname: fnr,
+						}
+						printJSON(o)
 
 					} else if err == nil && len(br.ext) > 0 {
 
@@ -663,6 +711,21 @@ func randPath(l int, d int, chars string) string {
 	return pathEscape(string(b))
 }
 
+// printHuman prints human readable output if enabled
+func printHuman(s ...any) {
+	if args.Output == "human" {
+		fmt.Println(s...)
+	}
+}
+
+// printJSON prints JSON formatted output if enabled
+func printJSON(o any) {
+	if args.Output == "json" {
+		j, _ := json.Marshal(o)
+		fmt.Println(string(j))
+	}
+}
+
 // Scan starts enumeration of the given URL
 func Scan(url string, hc *http.Client, st *httpStats, ac attackConfig, mk markers) {
 
@@ -671,25 +734,27 @@ func Scan(url string, hc *http.Client, st *httpStats, ac attackConfig, mk marker
 	// -----------------------------------------------
 
 	// Grab some headers and make sure the URL is accessible
-	fmt.Println(color.New(color.FgWhite, color.Bold).Sprint("Target")+":", url)
-	fmt.Print("Connecting...\r")
+	printHuman(color.New(color.FgWhite, color.Bold).Sprint("Target") + ":", url)
+	if args.Output == "human" {
+		fmt.Print("Connecting...\r")
+	}
 	res, err := fetch(hc, st, "GET", url + ".aspx")
 	if err != nil {
 		log.WithFields(log.Fields{"error": err}).Fatal("Unable to access server")
 	}
 
 	// Display server information
-	s := "<unknown>"
+	srv := "<unknown>"
 	if len(res.Header["Server"]) > 0 {
-		s = strings.Join(res.Header["Server"], ", ")
+		srv = strings.Join(res.Header["Server"], ", ")
 	}
 	if v, ok := res.Header["X-Aspnet-Version"]; ok {
-		s += " (ASP.NET v" + v[0] + ")"
+		srv += " (ASP.NET v" + v[0] + ")"
 	}
-	if s != "<unknown>" && !strings.Contains(s, "IIS") && !strings.Contains(s, "ASP") {
-		s += " " + color.HiRedString("[!]")
+	if args.Output == "human" && srv != "<unknown>" && !strings.Contains(srv, "IIS") && !strings.Contains(srv, "ASP") {
+		srv += " " + color.HiRedString("[!]")
 	}
-	fmt.Println(color.New(color.FgWhite, color.Bold).Sprint("Running")+":", s)
+	printHuman(color.New(color.FgWhite, color.Bold).Sprint("Running") + ":", srv)
 
 	// If autocomplete is in autoselect mode
 	if args.Autocomplete == "auto" {
@@ -807,14 +872,17 @@ func Scan(url string, hc *http.Client, st *httpStats, ac attackConfig, mk marker
 
 	}
 
+	// Output JSON status if requested
+	printJSON(statusOutput { Type: "status", Url: url, Server: srv, Vulnerable: len(ac.tildes) > 0 })
+
 	// Stop if no tilde files could be identified :'(
 	if len(ac.tildes) == 0 {
-		fmt.Println(color.New(color.FgWhite, color.Bold).Sprint("Vulnerable:"), color.HiBlueString("No"), "(or no 8.3 files exist)")
+		printHuman(color.New(color.FgWhite, color.Bold).Sprint("Vulnerable:"), color.HiBlueString("No"), "(or no 8.3 files exist)")
 		os.Exit(1)
 	}
 
 	// We are GO for second stage
-	fmt.Println(color.New(color.FgWhite, color.Bold).Sprint("Vulnerable:"), color.HiRedString("Yes!"))
+	printHuman(color.New(color.FgWhite, color.Bold).Sprint("Vulnerable:"), color.HiRedString("Yes!"))
 	log.WithFields(log.Fields{"method": ac.method, "suffix": ac.suffix, "statusPos": mk.statusPos, "statusNeg": mk.statusNeg}).Info("Found working options")
 	log.WithFields(log.Fields{"tildes": ac.tildes}).Info("Found tilde files")
 
@@ -869,15 +937,16 @@ func Scan(url string, hc *http.Client, st *httpStats, ac attackConfig, mk marker
 	wg := new(sync.WaitGroup)
 
 	// Loop through the tilde pool
-	fmt.Println("--------------------------------------------------------------------------------")
+	printHuman("--------------------------------------------------------------------------------")
 	for _, tilde := range ac.tildes {
 		enumerate(sem, wg, hc, st, &ac, mk, baseRequest{url: url, file: "", tilde: tilde, ext: ""})
 	}
 	wg.Wait()
-	fmt.Println("--------------------------------------------------------------------------------")
+	printHuman("--------------------------------------------------------------------------------")
 
 	// Fin
-	fmt.Printf("%s Requests: %d; Retries: %d; Sent %d bytes; Received %d bytes\n", color.New(color.FgWhite, color.Bold).Sprint("Finished!"), st.requests, st.retries, st.bytesTx, st.bytesRx)
+	printHuman(fmt.Sprintf("%s Requests: %d; Retries: %d; Sent %d bytes; Received %d bytes", color.New(color.FgWhite, color.Bold).Sprint("Finished!"), st.requests, st.retries, st.bytesTx, st.bytesRx))
+	printJSON(statsOutput { Type: "statistics", Requests: st.requests, Retries: st.retries, SentBytes: st.bytesTx, ReceivedBytes: st.bytesRx })
 
 }
 
@@ -886,12 +955,13 @@ func Run() {
 
 	// First things first
 	rand.Seed(time.Now().UTC().UnixNano())
-	fmt.Println(color.New(color.FgBlue, color.Bold).Sprint("Shortscan v" + version), "·", color.New(color.FgWhite, color.Bold).Sprint("an IIS short filename enumeration tool by bitquark"))
 
-	// Process command-line arguments
+	// Process command-line arguments and say hello
 	p := arg.MustParse(&args)
 	url := strings.TrimSuffix(args.Url, "/") + "/"
 	args.Autocomplete = strings.ToLower(args.Autocomplete)
+	args.Output = strings.ToLower(args.Output)
+	printHuman(getBanner())
 
 	// Default to HTTPS if no protocol was supplied
 	if !strings.Contains(url, "://") {
@@ -901,6 +971,9 @@ func Run() {
 	// Validate enum argument values
 	if args.Autocomplete != "auto" && args.Autocomplete != "method" && args.Autocomplete != "status" && args.Autocomplete != "distance" && args.Autocomplete != "none" {
 		p.Fail("autocomplete must be one of: auto, status, method, none")
+	}
+	if args.Output != "human" && args.Output != "json" {
+		p.Fail("output must be one of: human, json")
 	}
 
 	// Warn if any filename characters are invalid (https://docs.microsoft.com/en-us/windows/win32/fileio/naming-a-file)

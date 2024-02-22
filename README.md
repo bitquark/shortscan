@@ -54,9 +54,8 @@ shortscan --isvuln
 The following options allow further tweaks:
 
 ```
-$ shortscan --help
-Shortscan v0.6 · an IIS short filename enumeration tool by bitquark
-Usage: main [--wordlist FILE] [--header HEADER] [--concurrency CONCURRENCY] [--timeout SECONDS] [--verbosity VERBOSITY] [--fullurl] [--stabilise] [--patience LEVEL] [--characters CHARACTERS] [--autocomplete mode] [--isvuln] URL
+Shortscan v0.7 · an IIS short filename enumeration tool by bitquark
+Usage: shortscan [--wordlist FILE] [--header HEADER] [--concurrency CONCURRENCY] [--timeout SECONDS] [--output type] [--verbosity VERBOSITY] [--fullurl] [--stabilise] [--patience LEVEL] [--characters CHARACTERS] [--autocomplete mode] [--isvuln] URL
 
 Positional arguments:
   URL                    url to scan
@@ -70,6 +69,8 @@ Options:
                          number of requests to make at once [default: 20]
   --timeout SECONDS, -t SECONDS
                          per-request timeout in seconds [default: 10]
+  --output type, -o type
+                         output format (human = human readable; json = JSON) [default: human]
   --verbosity VERBOSITY, -v VERBOSITY
                          how much noise to make (0 = quiet; 1 = debug; 2 = trace) [default: 0]
   --fullurl, -F          display the full URL for confirmed files rather than just the filename [default: false]
@@ -82,6 +83,7 @@ Options:
                          autocomplete detection mode (auto = autoselect; method = HTTP method magic; status = HTTP status; distance = Levenshtein distance; none = disable) [default: auto]
   --isvuln, -V           bail after determining whether the service is vulnerable [default: false]
   --help, -h             display this help and exit
+  --version              display version and exit
 ```
 
 ## Utility
