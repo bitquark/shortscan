@@ -1,4 +1,4 @@
-# Shortscan
+# 🌀 Shortscan
 
 An IIS short filename enumeration tool.
 
