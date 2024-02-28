@@ -76,6 +76,7 @@ type attackConfig struct {
 	fileChars         map[string]string
 	extChars          map[string]string
 	foundFiles        map[string]struct{}
+	foundDirectories  map[string]struct{}
 	wordlist          wordlistConfig
 	distanceMutex     sync.Mutex
 	autocompleteMutex sync.Mutex
@@ -108,7 +109,7 @@ type statsOutput struct {
 }
 
 // Version, rainbow table magic, default character set
-const version = "0.8"
+const version = "0.9.0"
 const rainbowMagic = "#SHORTSCAN#"
 const alphanum = "JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320"
 
@@ -137,15 +138,15 @@ var checksumRegex *regexp.Regexp
 
 // Command-line arguments and help
 type arguments struct {
-	Urls         []string `arg:"positional,required" help:"url to scan (use multiple times for multiple URLs)"`
+	Urls         []string `arg:"positional,required" help:"url to scan (multiple URLs can be specified)" placeholder:"URL"`
 	Wordlist     string   `arg:"-w" help:"combined wordlist + rainbow table generated with shortutil" placeholder:"FILE"`
 	Headers      []string `arg:"--header,-H,separate" help:"header to send with each request (use multiple times for multiple headers)"`
 	Concurrency  int      `arg:"-c" help:"number of requests to make at once" default:"20"`
 	Timeout      int      `arg:"-t" help:"per-request timeout in seconds" placeholder:"SECONDS" default:"10"`
 	Output       string   `arg:"-o" help:"output format (human = human readable; json = JSON)" placeholder:"format" default:"human"`
 	Verbosity    int      `arg:"-v" help:"how much noise to make (0 = quiet; 1 = debug; 2 = trace)" default:"0"`
-	Recursive    bool     `arg:"-r" help:"detect and recurse into subdirectories" placeholder:"type" default:"true"`
 	FullUrl      bool     `arg:"-F" help:"display the full URL for confirmed files rather than just the filename" default:"false"`
+	NoRecurse    bool     `arg:"-n" help:"don't detect and recurse into subdirectories (disabled when autocomplete is disabled)" default:"false"`
 	Stabilise    bool     `arg:"-s" help:"attempt to get coherent autocomplete results from an unstable server (generates more requests)" default:"false"`
 	Patience     int      `arg:"-p" help:"patience level when determining vulnerability (0 = patient; 1 = very patient)" placeholder:"LEVEL" default:"0"`
 	Characters   string   `arg:"-C" help:"filename characters to enumerate" default:"JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320-_()&'!#$%@^{}~"`
@@ -341,6 +342,7 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 							// Loop through each filename candidate
 							for _, c := range fnc {
 
+								// Encapsulated to simplify mutex handling
 								func() {
 
 									// Lock the mutex
@@ -415,9 +417,33 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 
 									}
 
-									// Add the autocompleted filename to the list
+									// If a full filename was found
 									if fnr != "" {
+
+										// Add the autocomplete filename to the list
 										ac.foundFiles[fnr] = struct{}{}
+
+										// If recursion is enabled
+										if !args.NoRecurse {
+
+											// Make a HEAD request to the autocompleted URL
+											res, err := fetch(hc, st, "HEAD", br.url+fnr)
+											if err != nil {
+												log.WithFields(log.Fields{"err": err, "method": "HEAD", "url": br.url + fnr}).Info("Directory recursion check error")
+											} else {
+
+												// Check whether this looks like a directory redirect
+												if l := res.Header.Get("Location"); strings.HasSuffix(strings.ToLower(l), "/"+strings.ToLower(fnr)+"/") {
+
+													// Add the directory to the list for later recursion
+													ac.foundDirectories[fnr] = struct{}{}
+
+												}
+
+											}
+
+										}
+
 									}
 
 								}()
@@ -426,6 +452,7 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 								if fnr != "" {
 									break
 								}
+
 							}
 
 						}
@@ -977,6 +1004,7 @@ func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk m
 
 		// Initialise things
 		ac.foundFiles = make(map[string]struct{})
+		ac.foundDirectories = make(map[string]struct{})
 		sem := make(chan struct{}, args.Concurrency)
 		wg := new(sync.WaitGroup)
 
@@ -985,6 +1013,13 @@ func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk m
 			enumerate(sem, wg, hc, st, &ac, mk, baseRequest{url: url, file: "", tilde: tilde, ext: ""})
 		}
 		wg.Wait()
+
+		// Prepend discovered directories for processing next iteration
+		for dir := range ac.foundDirectories {
+			urls = append([]string{url + dir + "/"}, urls...)
+		}
+
+		// <hr>
 		printHuman("════════════════════════════════════════════════════════════════════════════════")
 
 	}
@@ -1002,15 +1037,13 @@ func Run() {
 	// First things first
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	// Process command-line arguments and say hello
+	// Parse and validate command-line arguments
 	p := arg.MustParse(&args)
 	args.Autocomplete = strings.ToLower(args.Autocomplete)
-	args.Output = strings.ToLower(args.Output)
-
-	// Validate enum argument values
 	if args.Autocomplete != "auto" && args.Autocomplete != "method" && args.Autocomplete != "status" && args.Autocomplete != "distance" && args.Autocomplete != "none" {
 		p.Fail("autocomplete must be one of: auto, status, method, none")
 	}
+	args.Output = strings.ToLower(args.Output)
 	if args.Output != "human" && args.Output != "json" {
 		p.Fail("output must be one of: human, json")
 	}
