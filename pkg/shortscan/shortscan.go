@@ -170,6 +170,24 @@ func pathEscape(url string) string {
 	return strings.Replace(nurl.QueryEscape(url), "+", "%20", -1)
 }
 
+// replace bin::$INDEX_ALLOCATION to /(S(x))/b/(S(x))in/ to download .DLL
+func replaceBinALLOCATION(url string) string {
+	u, _ := nurl.Parse(url)
+	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
+	lastSegment := segments[len(segments)-1]
+
+	if lastSegment == "bin::$INDEX_ALLOCATION" {
+		newPath := strings.Join(segments[:len(segments)-1], "/")
+		if newPath == "" {
+			newPath = "(S(x))/b/(S(x))in/"
+		} else {
+			newPath += "/(S(x))/b/(S(x))in/"
+		}
+		url = u.Scheme + "://" + u.Host + "/" + newPath
+	}
+	return url
+}
+
 // fetch requests the given URL and returns an HTTP response object, handling retries gracefully
 func fetch(hc *http.Client, st *httpStats, method string, url string) (*http.Response, error) {
 
@@ -355,6 +373,11 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 									// Skip this filename if it collides with a known discovery
 									if _, ok := ac.foundFiles[path]; ok {
 										return
+									}
+									
+									// replace bin::$INDEX_ALLOCATION to /(S(x))/b/(S(x))in/ to download .DLL
+									if strings.ToLower(br.ext) == ".dll" {
+										br.url = replaceBinALLOCATION(br.url)
 									}
 
 									// Make a request to the candidate URL
