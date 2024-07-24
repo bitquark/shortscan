@@ -1,10 +1,3 @@
-// ------------------------------------------------------
-// Shortscan
-// An IIS short filename enumeration tool by bitquark
-// ------------------------------------------------------
-// Docs and code: https://github.com/bitquark/shortscan
-// ------------------------------------------------------
-
 package shortscan
 
 import (
@@ -23,9 +16,9 @@ import (
 	"net/http/httputil"
 	"github.com/fatih/color"
 	"github.com/alexflint/go-arg"
-	"github.com/bitquark/shortscan/pkg/maths"
-	"github.com/bitquark/shortscan/pkg/shortutil"
-	"github.com/bitquark/shortscan/pkg/levenshtein"
+	"github.com/thezakman/shortscan/pkg/maths"
+	"github.com/thezakman/shortscan/pkg/shortutil"
+	"github.com/thezakman/shortscan/pkg/levenshtein"
 	log "github.com/sirupsen/logrus"
 	nurl "net/url"
 )
@@ -109,7 +102,7 @@ type statsOutput struct {
 }
 
 // Version, rainbow table magic, default character set
-const version = "0.9.0"
+const version = "0.9.1"
 const rainbowMagic = "#SHORTSCAN#"
 const alphanum = "JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320"
 
@@ -138,7 +131,8 @@ var checksumRegex *regexp.Regexp
 
 // Command-line arguments and help
 type arguments struct {
-	Urls         []string `arg:"positional,required" help:"url to scan (multiple URLs can be specified)" placeholder:"URL"`
+	Urls         []string `arg:"positional" help:"url to scan (multiple URLs can be specified)" placeholder:"URL"`
+	List         string   `arg:"--list,-l" help:"file containing list of URLs to scan" placeholder:"FILE"`
 	Wordlist     string   `arg:"-w" help:"combined wordlist + rainbow table generated with shortutil" placeholder:"FILE"`
 	Headers      []string `arg:"--header,-H,separate" help:"header to send with each request (use multiple times for multiple headers)"`
 	Concurrency  int      `arg:"-c" help:"number of requests to make at once" default:"20"`
@@ -820,7 +814,9 @@ func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk m
 		if args.Output == "human" && srv != "<unknown>" && !strings.Contains(srv, "IIS") && !strings.Contains(srv, "ASP") {
 			srv += " " + color.HiRedString("[!]")
 		}
+
 		printHuman(color.New(color.FgWhite, color.Bold).Sprint("Running")+":", srv)
+
 
 		// If autocomplete is in autoselect mode
 		if args.Autocomplete == "auto" {
@@ -1046,6 +1042,29 @@ func Run() {
 	args.Output = strings.ToLower(args.Output)
 	if args.Output != "human" && args.Output != "json" {
 		p.Fail("output must be one of: human, json")
+	}
+
+	// Read URLs from file if --list is provided
+	if args.List != "" {
+		file, err := os.Open(args.List)
+		if err != nil {
+			log.WithFields(log.Fields{"err": err}).Fatal("Unable to open URL list file")
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			args.Urls = append(args.Urls, scanner.Text())
+		}
+
+		if err := scanner.Err(); err != nil {
+			log.WithFields(log.Fields{"err": err}).Fatal("Error reading URL list file")
+		}
+	}
+
+	// Ensure at least one URL is provided
+	if len(args.Urls) == 0 {
+		p.Fail("error: at least one URL must be provided, either as a positional argument or using the --list flag")
 	}
 
 	// Say hello
