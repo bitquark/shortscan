@@ -76,7 +76,7 @@ type attackConfig struct {
 	fileChars         map[string]string
 	extChars          map[string]string
 	foundFiles        map[string]struct{}
-	foundDirectories  map[string]struct{}
+	foundDirectories  []string
 	wordlist          wordlistConfig
 	distanceMutex     sync.Mutex
 	autocompleteMutex sync.Mutex
@@ -109,7 +109,7 @@ type statsOutput struct {
 }
 
 // Version, rainbow table magic, default character set
-const version = "0.9.0"
+const version = "0.9.1"
 const rainbowMagic = "#SHORTSCAN#"
 const alphanum = "JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320"
 
@@ -436,7 +436,7 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 												if l := res.Header.Get("Location"); strings.HasSuffix(strings.ToLower(l), "/"+strings.ToLower(fnr)+"/") {
 
 													// Add the directory to the list for later recursion
-													ac.foundDirectories[fnr] = struct{}{}
+													ac.foundDirectories = append(ac.foundDirectories, fnr)
 
 												}
 
@@ -1004,7 +1004,6 @@ func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk m
 
 		// Initialise things
 		ac.foundFiles = make(map[string]struct{})
-		ac.foundDirectories = make(map[string]struct{})
 		sem := make(chan struct{}, args.Concurrency)
 		wg := new(sync.WaitGroup)
 
@@ -1015,8 +1014,8 @@ func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk m
 		wg.Wait()
 
 		// Prepend discovered directories for processing next iteration
-		for dir := range ac.foundDirectories {
-			urls = append([]string{url + dir + "/"}, urls...)
+		for i := len(ac.foundDirectories) - 1; i >= 0; i-- {
+			urls = append([]string{url + ac.foundDirectories[i] + "/"}, urls...)
 		}
 
 		// <hr>
