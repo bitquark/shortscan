@@ -37,6 +37,12 @@ Shortscan is easy to use with minimal configuration. Basic usage looks like:
 $ shortscan http://example.org/
 ```
 
+You can also specify a file containing a list of URLs to be scanned:
+
+```
+$ shortscan @urls.txt
+```
+
 ### Examples
 
 This example sets multiple custom headers by using `--header`/`-H` multiple times:
@@ -54,11 +60,11 @@ shortscan --isvuln
 The following options allow further tweaks:
 
 ```
-Shortscan v0.7 · an IIS short filename enumeration tool by bitquark
-Usage: shortscan [--wordlist FILE] [--header HEADER] [--concurrency CONCURRENCY] [--timeout SECONDS] [--output type] [--verbosity VERBOSITY] [--fullurl] [--stabilise] [--patience LEVEL] [--characters CHARACTERS] [--autocomplete mode] [--isvuln] URL
+🌀 Shortscan v0.9.2 · an IIS short filename enumeration tool by bitquark
+Usage: main [--wordlist FILE] [--header HEADER] [--concurrency CONCURRENCY] [--timeout SECONDS] [--output format] [--verbosity VERBOSITY] [--fullurl] [--norecurse] [--stabilise] [--patience LEVEL] [--characters CHARACTERS] [--autocomplete mode] [--isvuln] URL [URL ...]
 
 Positional arguments:
-  URL                    url to scan
+  URL                    url to scan (multiple URLs can be provided; a file containing URLs can be specified with an «at» prefix, for example: @urls.txt)
 
 Options:
   --wordlist FILE, -w FILE
@@ -69,11 +75,12 @@ Options:
                          number of requests to make at once [default: 20]
   --timeout SECONDS, -t SECONDS
                          per-request timeout in seconds [default: 10]
-  --output type, -o type
+  --output format, -o format
                          output format (human = human readable; json = JSON) [default: human]
   --verbosity VERBOSITY, -v VERBOSITY
                          how much noise to make (0 = quiet; 1 = debug; 2 = trace) [default: 0]
   --fullurl, -F          display the full URL for confirmed files rather than just the filename [default: false]
+  --norecurse, -n        don't detect and recurse into subdirectories (disabled when autocomplete is disabled) [default: false]
   --stabilise, -s        attempt to get coherent autocomplete results from an unstable server (generates more requests) [default: false]
   --patience LEVEL, -p LEVEL
                          patience level when determining vulnerability (0 = patient; 1 = very patient) [default: 0]

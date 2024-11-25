@@ -109,7 +109,7 @@ type statsOutput struct {
 }
 
 // Version, rainbow table magic, default character set
-const version = "0.9.1"
+const version = "0.9.2"
 const rainbowMagic = "#SHORTSCAN#"
 const alphanum = "JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320"
 
@@ -138,7 +138,7 @@ var checksumRegex *regexp.Regexp
 
 // Command-line arguments and help
 type arguments struct {
-	Urls         []string `arg:"positional,required" help:"url to scan (multiple URLs can be specified)" placeholder:"URL"`
+	Urls         []string `arg:"positional,required" help:"url to scan (multiple URLs can be provided; a file containing URLs can be specified with an «at» prefix, for example: @urls.txt)" placeholder:"URL"`
 	Wordlist     string   `arg:"-w" help:"combined wordlist + rainbow table generated with shortutil" placeholder:"FILE"`
 	Headers      []string `arg:"--header,-H,separate" help:"header to send with each request (use multiple times for multiple headers)"`
 	Concurrency  int      `arg:"-c" help:"number of requests to make at once" default:"20"`
@@ -1047,6 +1047,41 @@ func Run() {
 		p.Fail("output must be one of: human, json")
 	}
 
+	// Build the list of URLs to scan
+	var urls []string
+	for _, url := range args.Urls {
+
+		// If this is a filename rather than a URL
+		if strings.HasPrefix(url, "@") {
+
+			// Open the file
+			path := strings.TrimPrefix(url, "@")
+			fh, err := os.Open(path)
+			if err != nil {
+				log.WithFields(log.Fields{"path": path, "err": err}).Fatal("Unable to open URL list file")
+			}
+			defer fh.Close()
+
+			// Add each line to the URL list
+			sc := bufio.NewScanner(fh)
+			for sc.Scan() {
+				urls = append(urls, sc.Text())
+			}
+
+			// Check for file read errors
+			if err := sc.Err(); err != nil {
+				log.WithFields(log.Fields{"path": path, "err": err}).Fatal("Error reading URL list file")
+			}
+
+		} else {
+
+			// This is a plain URL, add it to the list
+			urls = append(urls, url)
+
+		}
+
+	}
+
 	// Say hello
 	printHuman(getBanner())
 
@@ -1160,6 +1195,6 @@ func Run() {
 	}
 
 	// Let's go!
-	Scan(args.Urls, hc, st, wc, mk)
+	Scan(urls, hc, st, wc, mk)
 
 }
