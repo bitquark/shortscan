@@ -804,7 +804,8 @@ func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk m
 		// Grab some headers and make sure the URL is accessible
 		res, err := fetch(hc, st, "GET", url+".aspx")
 		if err != nil {
-			log.WithFields(log.Fields{"error": err}).Fatal("Unable to access server")
+			fmt.Printf("Unable to access server: %s\n", url)
+                        continue
 		}
 
 		// Display server information
