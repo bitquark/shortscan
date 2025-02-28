@@ -136,6 +136,9 @@ var statusCache map[string]map[int]struct{}
 var distanceCache map[string]map[int]distances
 var checksumRegex *regexp.Regexp
 
+// Delay between requests set by the rate limit.
+var requestDelay time.Duration
+
 // Command-line arguments and help
 type arguments struct {
 	Urls         []string `arg:"positional,required" help:"url to scan (multiple URLs can be provided; a file containing URLs can be specified with an «at» prefix, for example: @urls.txt)" placeholder:"URL"`
@@ -148,6 +151,7 @@ type arguments struct {
 	FullUrl      bool     `arg:"-F" help:"display the full URL for confirmed files rather than just the filename" default:"false"`
 	NoRecurse    bool     `arg:"-n" help:"don't detect and recurse into subdirectories (disabled when autocomplete is disabled)" default:"false"`
 	Stabilise    bool     `arg:"-s" help:"attempt to get coherent autocomplete results from an unstable server (generates more requests)" default:"false"`
+	Rate         float32  `arg:"-r" help:"maximum requests per second, supports floating point values" default:"0.0"`
 	Patience     int      `arg:"-p" help:"patience level when determining vulnerability (0 = patient; 1 = very patient)" placeholder:"LEVEL" default:"0"`
 	Characters   string   `arg:"-C" help:"filename characters to enumerate" default:"JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320-_()&'!#$%@^{}~"`
 	Autocomplete string   `arg:"-a" help:"autocomplete detection mode (auto = autoselect; method = HTTP method magic; status = HTTP status; distance = Levenshtein distance; none = disable)" placeholder:"mode" default:"auto"`
@@ -170,8 +174,25 @@ func pathEscape(url string) string {
 	return strings.Replace(nurl.QueryEscape(url), "+", "%20", -1)
 }
 
+// Helper variable to the requestDelay function, keeps track of the time since the last request
+var lastRequestTime time.Time
+
+// delayRequest delays a request if it were to go over the rate limit
+func delayRequest() {
+	// Sleep to prevent going over the rate limit
+	sleepDuration := time.Until(lastRequestTime.Add(requestDelay))
+	time.Sleep(sleepDuration)
+
+	log.WithFields(log.Fields{"lastRequestTime": lastRequestTime, "requestDelay": requestDelay}).Info("Rate limit metadata")
+
+	// Update last request time
+	lastRequestTime = time.Now()
+}
+
 // fetch requests the given URL and returns an HTTP response object, handling retries gracefully
 func fetch(hc *http.Client, st *httpStats, method string, url string) (*http.Response, error) {
+	// Sleep until we are within rate limit constraints
+	delayRequest()
 
 	// Create a request object
 	req, err := http.NewRequest(method, url, nil)
@@ -1046,6 +1067,15 @@ func Run() {
 	if args.Output != "human" && args.Output != "json" {
 		p.Fail("output must be one of: human, json")
 	}
+
+	// If the rate limit is a negative treat it as no rate limit
+	delay := args.Rate
+	if args.Rate != 0 {
+		delay = 1_000_000.0 / args.Rate
+	}
+
+	// Initialize the calculated delay between requests, according to rate limit
+	requestDelay = time.Duration(delay) * time.Microsecond
 
 	// Build the list of URLs to scan
 	var urls []string
