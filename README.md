@@ -54,6 +54,10 @@ To check whether a site is vulnerable without performing file enumeration use:
 ```
 shortscan --isvuln
 ```
+To perform a technology scan on a target website:
+```
+shortscan --tecnologies
+```
 
 ### Advanced features
 
@@ -91,6 +95,7 @@ Options:
   --isvuln, -V           bail after determining whether the service is vulnerable [default: false]
   --help, -h             display this help and exit
   --version              display version and exit
+  --tecnologies, -T      display tecnologies and exit
 ```
 
 ## Utility

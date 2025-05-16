@@ -8,26 +8,28 @@
 package shortscan
 
 import (
-	"os"
-	"fmt"
-	"sync"
-	"time"
 	"bufio"
-	"embed"
-	"regexp"
-	"strings"
-	"math/rand"
 	"crypto/tls"
+	"embed"
 	"encoding/json"
+	"fmt"
+	"math/rand"
 	"net/http"
 	"net/http/httputil"
-	"github.com/fatih/color"
+	nurl "net/url"
+	"os"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/alexflint/go-arg"
+	"github.com/bitquark/shortscan/pkg/levenshtein"
 	"github.com/bitquark/shortscan/pkg/maths"
 	"github.com/bitquark/shortscan/pkg/shortutil"
-	"github.com/bitquark/shortscan/pkg/levenshtein"
+	"github.com/fatih/color"
+	wappalyzergo "github.com/projectdiscovery/wappalyzergo"
 	log "github.com/sirupsen/logrus"
-	nurl "net/url"
 )
 
 type baseRequest struct {
@@ -77,20 +79,27 @@ type attackConfig struct {
 	extChars          map[string]string
 	foundFiles        map[string]struct{}
 	foundDirectories  []string
-	wordlist          wordlistConfig
+	wordlist          *wordlistConfig
 	distanceMutex     sync.Mutex
 	autocompleteMutex sync.Mutex
 }
 
 type resultOutput struct {
-	Type      string `json:"type"`
-	FullMatch bool   `json:"fullmatch"`
-	BaseUrl   string `json:"baseurl"`
-	File      string `json:"shortfile"`
-	Ext       string `json:"shortext"`
-	Tilde     string `json:"shorttilde"`
-	Partname  string `json:"partname"`
-	Fullname  string `json:"fullname"`
+	Type          string   `json:"type"`
+	FullMatch     bool     `json:"fullmatch"`
+	BaseUrl       string   `json:"baseurl"`
+	File          string   `json:"shortfile"`
+	Ext           string   `json:"shortext"`
+	Tilde         string   `json:"shorttilde"`
+	Partname      string   `json:"partname"`
+	Fullname      string   `json:"fullname"`
+	StatusCode    int      `json:"status_code"`
+	ContentType   string   `json:"content_type"`
+	ContentLength int      `json:"content_length"`
+	IISVersion    string   `json:"iis_version"`
+	DirListing    bool     `json:"iis_dir_listing"`
+	SensitiveFile bool     `json:"iis_sensitive_file"`
+	Technologies  []string `json:"technologies"`
 }
 
 type statusOutput struct {
@@ -143,7 +152,8 @@ type arguments struct {
 	Headers      []string `arg:"--header,-H,separate" help:"header to send with each request (use multiple times for multiple headers)"`
 	Concurrency  int      `arg:"-c" help:"number of requests to make at once" default:"20"`
 	Timeout      int      `arg:"-t" help:"per-request timeout in seconds" placeholder:"SECONDS" default:"10"`
-	Output       string   `arg:"-o" help:"output format (human = human readable; json = JSON)" placeholder:"format" default:"human"`
+	Output       string   `arg:"-o" help:"output format (human = human readable; json = JSON; csv = CSV)" placeholder:"format" default:"human"`
+	OutputFile   string   `arg:"--output-file" help:"file to save results (json or csv)" placeholder:"FILE"`
 	Verbosity    int      `arg:"-v" help:"how much noise to make (0 = quiet; 1 = debug; 2 = trace)" default:"0"`
 	FullUrl      bool     `arg:"-F" help:"display the full URL for confirmed files rather than just the filename" default:"false"`
 	NoRecurse    bool     `arg:"-n" help:"don't detect and recurse into subdirectories (disabled when autocomplete is disabled)" default:"false"`
@@ -152,17 +162,14 @@ type arguments struct {
 	Characters   string   `arg:"-C" help:"filename characters to enumerate" default:"JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320-_()&'!#$%@^{}~"`
 	Autocomplete string   `arg:"-a" help:"autocomplete detection mode (auto = autoselect; method = HTTP method magic; status = HTTP status; distance = Levenshtein distance; none = disable)" placeholder:"mode" default:"auto"`
 	IsVuln       bool     `arg:"-V" help:"bail after determining whether the service is vulnerable" default:"false"`
-}
-
-func (arguments) Version() string {
-	return getBanner()
+	Technologies bool     `arg:"-T" help:"determine the technologies used by the service" default:"false"`
 }
 
 var args arguments
 
 // getBanner returns the main banner
 func getBanner() string {
-	return color.New(color.FgBlue, color.Bold).Sprint("🌀 Shortscan v"+version) + " · " + color.New(color.FgWhite, color.Bold).Sprint("an IIS short filename enumeration tool by bitquark")
+	return color.New(color.FgBlue, color.Bold).Sprint("🌀Shortscan v"+version) + " · " + color.New(color.FgWhite, color.Bold).Sprint("an IIS short filename enumeration tool by bitquark")
 }
 
 // pathEscape returns an escaped URL with spaces encoded as %20 rather than + (which can cause odd behaviour from IIS in some modes)
@@ -267,7 +274,7 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 	}
 
 	// Loop through characters
-	for _, char := range chars {
+	for _, currentChar := range chars {
 
 		// Increment the waitgroup
 		wg.Add(1)
@@ -366,6 +373,11 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 										return
 									}
 
+									// Read the response body
+									b := make([]byte, 1024)
+									res.Body.Read(b)
+									body := string(b)
+
 									// Branch based on autocomplete mode
 									if args.Autocomplete == "method" {
 
@@ -396,10 +408,7 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 										} else {
 
 											// Calculate Levenshtein distance between the response and the sample response
-											b := make([]byte, 1024)
-											res.Body.Read(b)
-											body, sbody := string(b), dists[res.StatusCode].body
-											lp := float32(levenshtein.Distance(sbody, body)) / float32(maths.Max(len(sbody), len(body)))
+											lp := float32(levenshtein.Distance(body, dists[res.StatusCode].body)) / float32(maths.Max(len(body), len(dists[res.StatusCode].body)))
 
 											// If the distance delta is more than 10%
 											d := lp - dists[res.StatusCode].distance
@@ -492,14 +501,21 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 
 							// Output JSON result if requested
 							o := resultOutput{
-								Type:      "result",
-								FullMatch: fnr != "",
-								BaseUrl:   br.url,
-								File:      br.file,
-								Tilde:     br.tilde,
-								Ext:       br.ext,
-								Partname:  fn + fe,
-								Fullname:  fnr,
+								Type:          "result",
+								FullMatch:     fnr != "",
+								BaseUrl:       br.url,
+								File:          br.file,
+								Tilde:         br.tilde,
+								Ext:           br.ext,
+								Partname:      fn + fe,
+								Fullname:      fnr,
+								StatusCode:    res.StatusCode,
+								ContentType:   res.Header.Get("Content-Type"),
+								ContentLength: int(res.ContentLength),
+								IISVersion:    "",
+								DirListing:    false,
+								SensitiveFile: false,
+								Technologies:  nil,
 							}
 							printJSON(o)
 
@@ -534,7 +550,7 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 					}
 
 					// Recurse if there are more characters in the name
-					res, err = fetch(hc, st, ac.method, url)
+					res, err := fetch(hc, st, ac.method, url)
 					if err == nil && res.StatusCode != mk.statusNeg {
 						enumerate(sem, wg, hc, st, ac, mk, br)
 					}
@@ -543,7 +559,7 @@ func enumerate(sem chan struct{}, wg *sync.WaitGroup, hc *http.Client, st *httpS
 
 			}
 
-		}(sem, wg, hc, ac, mk, br, string(char))
+		}(sem, wg, hc, ac, mk, br, string(currentChar))
 
 	}
 
@@ -555,7 +571,7 @@ func autocomplete(ac *attackConfig, br baseRequest) []wordlistRecord {
 	// Match the filename against each wordlist entry
 	var fs = make(map[string]wordlistRecord)
 	var ch = make(chan wordlistRecord, 1024)
-	go getWordlist(ch, ac)
+	go getWordlist(ch, ac.wordlist)
 	for record := range ch {
 
 		// If the discovered filename and extension match the wordlist entry add the word to the list
@@ -593,7 +609,7 @@ func autodechecksum(ac *attackConfig, br baseRequest) []wordlistRecord {
 	// Match the checksum and prefix against each wordlist entry
 	var fs = make(map[string]wordlistRecord)
 	var ch = make(chan wordlistRecord, 1024)
-	go getWordlist(ch, ac)
+	go getWordlist(ch, ac.wordlist)
 	for record := range ch {
 
 		// If the potential checksum matches a wordlist checksum and the filename prefix and extension match
@@ -732,18 +748,18 @@ func getDistances(c wordlistRecord, br baseRequest, hc *http.Client, st *httpSta
 }
 
 // getWordlist returns wordlist entries
-func getWordlist(ch chan wordlistRecord, ac *attackConfig) {
+func getWordlist(ch chan wordlistRecord, wc *wordlistConfig) {
 
 	// Lock the wordlist
-	ac.wordlist.Lock()
+	wc.Lock()
 
 	// Return each word
-	for _, record := range ac.wordlist.wordlist {
+	for _, record := range wc.wordlist {
 		ch <- record
 	}
 
 	// Unlock the wordlist and close the channel
-	ac.wordlist.Unlock()
+	wc.Unlock()
 	close(ch)
 
 }
@@ -776,10 +792,43 @@ func printJSON(o any) {
 	}
 }
 
+// IIS-specific analysis function: Server header, directory listing, and sensitive file detection
+func analyzeIIS(resp *http.Response, bodyBytes []byte) (iisVersion string, isDirListing bool, isSensitiveFile bool) {
+	iisVersion = resp.Header.Get("Server")
+	isDirListing = false
+	isSensitiveFile = false
+
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
+		body := string(bodyBytes)
+		if strings.Contains(body, "Index of /") || strings.Contains(body, "Directory Listing") {
+			isDirListing = true
+		}
+		if strings.Contains(strings.ToLower(resp.Request.URL.Path), "web.config") {
+			isSensitiveFile = true
+		}
+	}
+	return
+}
+
+// Technology detection function using WappalyzerGo
+func detectTechnologies(headers http.Header, body []byte) []string {
+	client, err := wappalyzergo.New()
+	if err != nil {
+		return []string{"wappalyzer init error"}
+	}
+	tech := client.Fingerprint(headers, body)
+	var techs []string
+	for k := range tech {
+		techs = append(techs, k)
+	}
+	return techs
+}
+
 // Scan starts enumeration of the given URL
-func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk markers) {
+func Scan(urls []string, hc *http.Client, st *httpStats, wc *wordlistConfig, mk markers) []resultOutput {
 
 	// Loop through each URL
+	var results []resultOutput
 	for len(urls) > 0 {
 
 		// Pop off a URL
@@ -808,7 +857,7 @@ func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk m
 		}
 
 		// Display server information
-		printHuman("\n════════════════════════════════════════════════════════════════════════════════")
+		printHuman("\n------------------------------------------------")
 		printHuman(color.New(color.FgWhite, color.Bold).Sprint("URL")+":", url)
 		srv := "<unknown>"
 		if len(res.Header["Server"]) > 0 {
@@ -855,11 +904,11 @@ func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk m
 		}
 
 		// Loop through path suffixes
-		outerEscape:
+	outerEscape:
 		for _, suffix := range pathSuffixes[:pc] {
 
 			// Loop through each method
-			methodEscape:
+		methodEscape:
 			for _, method := range httpMethods[:mc] {
 
 				// Make some requests for non-existent files
@@ -947,13 +996,19 @@ func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk m
 		// Skip this URL if no tilde files could be identified :'(
 		if len(ac.tildes) == 0 {
 			printHuman(color.New(color.FgWhite, color.Bold).Sprint("Vulnerable:"), color.HiBlueString("No"), "(or no 8.3 files exist)")
-			printHuman("════════════════════════════════════════════════════════════════════════════════")
+			printHuman("------------------------------------------------")
 			continue
 		}
 
 		// We are GO for second stage
+		if args.Technologies {
+			technologies := detectTechnologies(res.Header, []byte{})
+			if len(technologies) > 0 {
+				printHuman(fmt.Sprintf("Technologies: %s", strings.Join(technologies, ", ")))
+			}
+		}
 		printHuman(color.New(color.FgWhite, color.Bold).Sprint("Vulnerable:"), color.HiRedString("Yes!"))
-		printHuman("════════════════════════════════════════════════════════════════════════════════")
+		printHuman("------------------------------------------------")
 		log.WithFields(log.Fields{"method": ac.method, "suffix": ac.suffix, "statusPos": mk.statusPos, "statusNeg": mk.statusNeg}).Info("Found working options")
 		log.WithFields(log.Fields{"tildes": ac.tildes}).Info("Found tilde files")
 
@@ -1019,8 +1074,15 @@ func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk m
 		}
 
 		// <hr>
-		printHuman("════════════════════════════════════════════════════════════════════════════════")
+		printHuman("------------------------------------------------")
 
+		// If -T or --technologies is set, detect technologies
+		if args.Technologies {
+			technologies := detectTechnologies(res.Header, []byte{})
+			if len(technologies) > 0 {
+				printHuman(fmt.Sprintf("Technologies: %s", strings.Join(technologies, ", ")))
+			}
+		}
 	}
 	printHuman()
 
@@ -1028,6 +1090,7 @@ func Scan(urls []string, hc *http.Client, st *httpStats, wc wordlistConfig, mk m
 	printHuman(fmt.Sprintf("%s Requests: %d; Retries: %d; Sent %d bytes; Received %d bytes", color.New(color.FgWhite, color.Bold).Sprint("Finished!"), st.requests, st.retries, st.bytesTx, st.bytesRx))
 	printJSON(statsOutput{Type: "statistics", Requests: st.requests, Retries: st.retries, SentBytes: st.bytesTx, ReceivedBytes: st.bytesRx})
 
+	return results
 }
 
 // Run kicks off scans from the command line
@@ -1043,8 +1106,8 @@ func Run() {
 		p.Fail("autocomplete must be one of: auto, status, method, none")
 	}
 	args.Output = strings.ToLower(args.Output)
-	if args.Output != "human" && args.Output != "json" {
-		p.Fail("output must be one of: human, json")
+	if args.Output != "human" && args.Output != "json" && args.Output != "csv" {
+		p.Fail("output must be one of: human, json, csv")
 	}
 
 	// Build the list of URLs to scan
@@ -1195,6 +1258,57 @@ func Run() {
 	}
 
 	// Let's go!
-	Scan(urls, hc, st, wc, mk)
+	var results []resultOutput
+	results = Scan(urls, hc, st, &wc, mk)
 
+	// Save results if requested
+	if args.OutputFile != "" {
+		if args.Output == "json" {
+			// Save as JSON
+			err := saveResultsToFile(results, args.OutputFile)
+			if err != nil {
+				fmt.Println("Error saving results to file:", err)
+			} else {
+				fmt.Println("Results saved to", args.OutputFile)
+			}
+		} else if args.Output == "csv" {
+			// Save as CSV
+			err := saveResultsToCSV(results, args.OutputFile)
+			if err != nil {
+				fmt.Println("Error saving results to file:", err)
+			} else {
+				fmt.Println("Results saved to", args.OutputFile)
+			}
+		}
+	}
+}
+
+// Write results to a file as JSON
+func saveResultsToFile(results []resultOutput, filename string) error {
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	return enc.Encode(results)
+}
+
+// Write results to a file as CSV
+func saveResultsToCSV(results []resultOutput, filename string) error {
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	// Write header
+	w.WriteString("URL,File,Extension,StatusCode,ContentType,ContentLength,IISVersion,DirListing,SensitiveFile,Technologies\n")
+	for _, r := range results {
+		w.WriteString(fmt.Sprintf("%s,%s,%s,%d,%s,%d,%s,%t,%t,\"%s\"\n",
+			r.BaseUrl, r.File, r.Ext, r.StatusCode, r.ContentType, r.ContentLength, r.IISVersion, r.DirListing, r.SensitiveFile, strings.Join(r.Technologies, "; ")))
+	}
+	return nil
 }
