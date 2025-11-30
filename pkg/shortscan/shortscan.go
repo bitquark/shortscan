@@ -141,6 +141,7 @@ type arguments struct {
 	Urls         []string `arg:"positional,required" help:"url to scan (multiple URLs can be provided; a file containing URLs can be specified with an «at» prefix, for example: @urls.txt)" placeholder:"URL"`
 	Wordlist     string   `arg:"-w" help:"combined wordlist + rainbow table generated with shortutil" placeholder:"FILE"`
 	Headers      []string `arg:"--header,-H,separate" help:"header to send with each request (use multiple times for multiple headers)"`
+	Proxy        string   `arg:"--proxy" help:"proxy server to use for requests (e.g., http://127.0.0.1:8080)" placeholder:"PROXY"`
 	Concurrency  int      `arg:"-c" help:"number of requests to make at once" default:"20"`
 	Timeout      int      `arg:"-t" help:"per-request timeout in seconds" placeholder:"SECONDS" default:"10"`
 	Output       string   `arg:"-o" help:"output format (human = human readable; json = JSON)" placeholder:"format" default:"human"`
@@ -1105,10 +1106,24 @@ func Run() {
 		log.SetLevel(log.WarnLevel)
 	}
 
-	// Build an HTTP client
+	// Build an HTTP client with optional custom proxy
+	var proxyFunc func(*http.Request) (*nurl.URL, error)
+	if args.Proxy != "" {
+		// Parse the proxy URL
+		proxyURL, err := nurl.Parse(args.Proxy)
+		if err != nil {
+			log.WithFields(log.Fields{"proxy": args.Proxy, "err": err}).Fatal("Unable to parse proxy URL")
+		}
+		log.WithFields(log.Fields{"proxy": args.Proxy}).Info("Using custom proxy")
+		proxyFunc = http.ProxyURL(proxyURL)
+	} else {
+		// Use environment variables if no custom proxy specified
+		proxyFunc = http.ProxyFromEnvironment
+	}
+
 	hc := &http.Client{
 		Timeout:       time.Duration(args.Timeout) * time.Second,
-		Transport:     &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, Renegotiation: tls.RenegotiateOnceAsClient}, Proxy: http.ProxyFromEnvironment},
+		Transport:     &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, Renegotiation: tls.RenegotiateOnceAsClient}, Proxy: proxyFunc},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
 	}
 
