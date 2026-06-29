@@ -152,6 +152,7 @@ type arguments struct {
 	Characters   string   `arg:"-C" help:"filename characters to enumerate" default:"JFKGOTMYVHSPCANDXLRWEBQUIZ8549176320-_()&'!#$%@^{}~"`
 	Autocomplete string   `arg:"-a" help:"autocomplete detection mode (auto = autoselect; method = HTTP method magic; status = HTTP status; distance = Levenshtein distance; none = disable)" placeholder:"mode" default:"auto"`
 	IsVuln       bool     `arg:"-V" help:"bail after determining whether the service is vulnerable" default:"false"`
+	Proxy        string   `arg:"--proxy,-x" help:"proxy to send requests through (e.g. http://proxy:8080 or socks5://proxy:1080)" placeholder:"URL"`
 }
 
 func (arguments) Version() string {
@@ -1105,10 +1106,20 @@ func Run() {
 		log.SetLevel(log.WarnLevel)
 	}
 
+	// Resolve proxy function: explicit flag takes priority over environment variables
+	proxyFunc := http.ProxyFromEnvironment
+	if args.Proxy != "" {
+		proxyUrl, err := nurl.Parse(args.Proxy)
+		if err != nil {
+			log.WithFields(log.Fields{"err": err}).Fatal("Invalid proxy URL")
+		}
+		proxyFunc = http.ProxyURL(proxyUrl)
+	}
+
 	// Build an HTTP client
 	hc := &http.Client{
 		Timeout:       time.Duration(args.Timeout) * time.Second,
-		Transport:     &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, Renegotiation: tls.RenegotiateOnceAsClient}, Proxy: http.ProxyFromEnvironment},
+		Transport:     &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, Renegotiation: tls.RenegotiateOnceAsClient}, Proxy: proxyFunc},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
 	}
 
